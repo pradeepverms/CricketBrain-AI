@@ -338,3 +338,27 @@ docker-compose up --build
 ---
 
 *MIT License — free for personal, educational, and portfolio use.*
+📊 Dashboard Preview
+
+🔥 IPL League Overview
+
+<p align="center">
+  <img src="assets/screenshots/overview.png" width="85%">
+</p>🤖 AI Match Predictor
+
+<p align="center">
+  <img src="assets/screenshots/predictor.png" width="85%">
+</p>🧠 Explainable AI (SHAP)
+
+<p align="center">
+  <img src="assets/screenshots/shap.png" width="85%">
+</p>💰 Fantasy Team Optimizer
+
+<p align="center">
+  <img src="assets/screenshots/optimizer.png" width="85%">
+</p>
+
+👨‍💻 Author
+
+Pradip Kumar Verma
+AI & Data Science StudentPassionate about building real-world ML systems 🚀
