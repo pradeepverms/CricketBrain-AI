@@ -1,0 +1,337 @@
+"""
+CricketBrain AI — Intelligence Engine
+All AI-generated insights, decisions, classifications, scores
+Used across every page to answer "So what?"
+"""
+
+import pandas as pd
+import numpy as np
+
+
+# ─────────────────────────────────────────────────────────
+# FORM CLASSIFICATION
+# ─────────────────────────────────────────────────────────
+def classify_form(recent_avg, career_avg):
+    """Returns HOT / GOOD / AVERAGE / DECLINING with emoji"""
+    if career_avg <= 0:
+        return "⚪ Insufficient Data", 0
+    ratio = recent_avg / career_avg
+    if ratio >= 1.25:
+        return "🔥 HOT FORM", ratio
+    elif ratio >= 1.05:
+        return "✅ GOOD FORM", ratio
+    elif ratio >= 0.85:
+        return "📊 AVERAGE FORM", ratio
+    else:
+        return "📉 DECLINING", ratio
+
+
+def risk_score(scores):
+    """Consistency-based risk score 0-10 (10 = very risky/inconsistent)"""
+    if len(scores) < 3:
+        return 5.0
+    cv = np.std(scores) / max(np.mean(scores), 1)
+    return round(min(cv * 10, 10), 1)
+
+
+def trend_prediction(scores):
+    """Linear trend: returning 'improving', 'declining', 'stable'"""
+    if len(scores) < 4:
+        return "stable", 0
+    x = np.arange(len(scores))
+    slope = np.polyfit(x, scores, 1)[0]
+    if slope > 1.5:
+        return "improving", slope
+    elif slope < -1.5:
+        return "declining", slope
+    return "stable", slope
+
+
+def form_vs_career(recent_avg, career_avg):
+    """Returns delta % vs career baseline"""
+    if career_avg <= 0:
+        return 0
+    return round((recent_avg - career_avg) / career_avg * 100, 1)
+
+
+# ─────────────────────────────────────────────────────────
+# WIN PROBABILITY INTELLIGENCE
+# ─────────────────────────────────────────────────────────
+def detect_turning_points(over_probs, threshold=0.12):
+    """
+    Given a list of (over, win_prob) tuples, detect overs
+    where probability shifted more than threshold.
+    Returns list of dicts with over, shift, direction.
+    """
+    turning = []
+    for i in range(1, len(over_probs)):
+        shift = over_probs[i][1] - over_probs[i-1][1]
+        if abs(shift) >= threshold:
+            turning.append({
+                "over": over_probs[i][0],
+                "shift": round(shift * 100, 1),
+                "direction": "📈 Batting team gained" if shift > 0 else "📉 Bowling team gained",
+                "magnitude": "MAJOR" if abs(shift) > 0.20 else "SIGNIFICANT"
+            })
+    return turning
+
+
+def why_prob_changed(over_data, prev_prob, curr_prob):
+    """Generate NL explanation for why win probability changed"""
+    reasons = []
+    shift = curr_prob - prev_prob
+
+    wkts  = over_data.get("wickets", 0)
+    runs  = over_data.get("runs", 0)
+    rr    = over_data.get("run_rate", 0)
+    req_rr = over_data.get("required_rr", 0)
+
+    if wkts >= 2:
+        reasons.append(f"💀 **{wkts} wickets fell** this over — batting collapse")
+    elif wkts == 1:
+        reasons.append("💀 **Key wicket** changed the balance")
+
+    if req_rr > 0 and rr > 0:
+        if req_rr > rr + 3:
+            reasons.append(f"⚡ Required RR ({req_rr:.1f}) outpacing scoring rate ({rr:.1f})")
+        elif rr > req_rr + 2:
+            reasons.append(f"🏏 Batting team **ahead of target** — scoring {rr:.1f} vs needed {req_rr:.1f}")
+
+    if runs >= 15:
+        reasons.append(f"💥 **Big over** — {runs} runs scored, pressure released")
+    elif runs <= 3 and wkts == 0:
+        reasons.append(f"🔒 **Dot ball over** — scoring dried up, pressure building")
+
+    if not reasons:
+        reasons.append(f"📊 Gradual {'improvement' if shift > 0 else 'decline'} in match position")
+
+    return reasons
+
+
+def what_to_do_next(required_rr, current_rr, wickets_left, overs_left, batting_first=False):
+    """Decision engine — what should batting/bowling team do next"""
+    decisions = []
+
+    if not batting_first:  # chasing
+        gap = required_rr - current_rr
+        if gap > 3:
+            decisions.append("🚨 **URGENT:** Need a boundary every 2 balls — target big hitters now")
+            decisions.append(f"⚡ Required RR is {required_rr:.1f} — send in attacking batter immediately")
+        elif gap > 1.5:
+            decisions.append(f"⚠️ Required RR rising to {required_rr:.1f} — increase scoring rate")
+            decisions.append("🎯 Look for singles + twos to rotate strike, hit boundary when loose ball appears")
+        elif gap < -1:
+            decisions.append("✅ Ahead of target — keep wickets in hand, don't take unnecessary risks")
+            decisions.append(f"🛡️ {wickets_left} wickets remaining — accelerate only in last 4 overs")
+        else:
+            decisions.append("⚖️ Match is evenly poised — rotate strike, wait for bad ball")
+
+        if wickets_left <= 3 and overs_left > 5:
+            decisions.append("💀 **LOW WICKETS WARNING** — protect tail, play smart")
+    else:  # bowling
+        if required_rr > 10:
+            decisions.append(f"🔒 **DEFEND MODE** — chasing team needs {required_rr:.1f} RPO, bowl full & straight")
+            decisions.append("🎯 Target stumps, no wide balls — every run is precious")
+        elif required_rr < 7:
+            decisions.append("⚡ Chase is on — attack early, take wickets to break partnerships")
+            decisions.append("🌀 Bring on your best bowler now — a wicket changes everything")
+
+    return decisions
+
+
+# ─────────────────────────────────────────────────────────
+# PLAYOFF PROBABILITY (Monte Carlo)
+# ─────────────────────────────────────────────────────────
+def playoff_probability(team, current_pts, matches_played, total_matches,
+                         all_teams_pts, n_sim=5000):
+    """
+    Simulate remaining season and calculate playoff qualification probability.
+    Top 4 qualify in IPL.
+    """
+    np.random.seed(42)
+    remaining = total_matches - matches_played
+    qualify_count = 0
+
+    other_teams = {t: p for t, p in all_teams_pts.items() if t != team}
+
+    for _ in range(n_sim):
+        sim_pts = current_pts + np.random.binomial(remaining, 0.5) * 2
+        others_sim = {}
+        for t, p in other_teams.items():
+            t_remaining = total_matches - (p // 2)
+            t_remaining = max(0, min(t_remaining, remaining))
+            others_sim[t] = p + np.random.binomial(t_remaining, 0.5) * 2
+
+        all_pts = {team: sim_pts, **others_sim}
+        ranking = sorted(all_pts, key=lambda x: all_pts[x], reverse=True)
+        if team in ranking[:4]:
+            qualify_count += 1
+
+    return round(qualify_count / n_sim * 100, 1)
+
+
+# ─────────────────────────────────────────────────────────
+# PITCH TYPE CLASSIFIER
+# ─────────────────────────────────────────────────────────
+def classify_pitch(avg_score, avg_wickets, avg_rr_pp, avg_rr_death):
+    """
+    Returns pitch type + strategy based on historical venue stats
+    """
+    score = 0
+
+    if avg_score > 180:
+        score += 2
+    elif avg_score > 165:
+        score += 1
+    elif avg_score < 145:
+        score -= 2
+
+    if avg_rr_pp > 8.5:
+        score += 1
+    if avg_rr_death > 11:
+        score += 1
+
+    if avg_wickets < 6:
+        score += 1
+
+    if score >= 3:
+        pitch_type = "🏏 BATTING PARADISE"
+        strategy = "Bat first — big totals common. Chase is high risk."
+    elif score >= 1:
+        pitch_type = "⚖️ BALANCED PITCH"
+        strategy = "Toss matters — winner should read conditions and decide."
+    elif score >= -1:
+        pitch_type = "🎳 BOWLER-FRIENDLY"
+        strategy = "Restrict first — 160 is a strong total here."
+    else:
+        pitch_type = "🎳 SEAM & SWING TRACK"
+        strategy = "Bowl first — wickets up front win matches here."
+
+    return pitch_type, strategy
+
+
+# ─────────────────────────────────────────────────────────
+# IMPACT SCORE
+# ─────────────────────────────────────────────────────────
+def impact_score(runs, sr, avg, wickets=0, economy=None, matches=1):
+    """
+    Composite match-winning impact score (0-100)
+    Considers runs, SR above baseline, wickets, economy
+    """
+    bat_impact = min((runs / max(avg, 1)) * (sr / 120) * 40, 50)
+    bowl_impact = 0
+    if wickets > 0 and economy is not None:
+        bowl_impact = min(wickets * 10 + max(0, (8 - economy) * 3), 50)
+    return round(min(bat_impact + bowl_impact, 100), 1)
+
+
+# ─────────────────────────────────────────────────────────
+# SUSTAINABILITY SCORE (for breakout players)
+# ─────────────────────────────────────────────────────────
+def sustainability_score(recent_scores, career_avg):
+    """
+    How sustainable is a breakout? 0-100
+    Based on: consistency of recent scores, vs career baseline
+    """
+    if len(recent_scores) < 3:
+        return 50
+    recent_avg = np.mean(recent_scores)
+    std        = np.std(recent_scores)
+    cv         = std / max(recent_avg, 1)
+    above_career = (recent_avg - career_avg) / max(career_avg, 1)
+
+    consistency_score = max(0, 100 - cv * 100)
+    improvement_score = min(above_career * 50, 50)
+    return round((consistency_score * 0.6 + improvement_score * 0.4), 1)
+
+
+def why_breakout(curr_sr, prev_sr, curr_avg, prev_avg, curr_innings, prev_innings):
+    """Generate NL explanation for why a player broke out"""
+    reasons = []
+    if curr_sr - prev_sr > 15:
+        reasons.append(f"⚡ **Strike rate surged** +{curr_sr-prev_sr:.0f} — more aggressive approach")
+    if curr_avg - prev_avg > 8:
+        reasons.append(f"📈 **Average improved** +{curr_avg-prev_avg:.0f} — better shot selection")
+    if curr_innings > prev_innings * 1.3:
+        reasons.append(f"🏏 **More opportunities** — batting higher in order or more matches")
+    if not reasons:
+        reasons.append("📊 Consistent improvement across all metrics")
+    return reasons
+
+
+# ─────────────────────────────────────────────────────────
+# PLAYER STYLE CLASSIFIER
+# ─────────────────────────────────────────────────────────
+def classify_play_style(sr, avg, boundary_pct):
+    """Classify player's play style"""
+    if sr >= 160 and boundary_pct >= 0.5:
+        return "💥 AGGRESSIVE STRIKER", "Hits boundaries at premium, explosive in death overs"
+    elif sr >= 145 and avg >= 30:
+        return "⚡ POWER HITTER", "Consistent run-scorer with high scoring rate"
+    elif avg >= 35 and sr < 130:
+        return "🛡️ ANCHOR BATTER", "Builds innings, high average but measured approach"
+    elif sr >= 130 and avg >= 25:
+        return "⚖️ BALANCED BATTER", "Adaptable — can play both roles depending on situation"
+    else:
+        return "🎯 SITUATIONAL PLAYER", "Context-dependent player — role varies by match situation"
+
+
+# ─────────────────────────────────────────────────────────
+# FANTASY INTELLIGENCE
+# ─────────────────────────────────────────────────────────
+def fantasy_player_reasoning(player_row, captain, vice_captain):
+    """Generate WHY THIS PLAYER explanation"""
+    p = player_row["player"]
+    fp = player_row["fp_total"]
+    role = player_row.get("role", "BAT")
+    fp_bat = player_row.get("fp_batting", 0)
+    fp_bowl = player_row.get("fp_bowling", 0)
+
+    lines = []
+    if p == captain:
+        lines.append(f"👑 **Captain pick** — highest expected FP ({fp:.0f} pts, 2× multiplier = {fp*2:.0f} pts)")
+    elif p == vice_captain:
+        lines.append(f"🥈 **Vice-captain** — second highest FP ({fp:.0f} pts, 1.5× = {fp*1.5:.0f} pts)")
+
+    if fp_bat > 40:
+        lines.append(f"🏏 Strong batting form — avg {fp_bat:.0f} batting pts recently")
+    if fp_bowl > 20:
+        lines.append(f"🎳 Wicket-taking threat — avg {fp_bowl:.0f} bowling pts recently")
+    if role == "AR":
+        lines.append("⚡ All-rounder bonus — contributes on both fronts")
+
+    return lines if lines else [f"📊 Selected for consistency — {fp:.0f} expected pts"]
+
+
+def diversity_score(team_df):
+    """Team diversity: role mix + team mix"""
+    roles = team_df["role"].value_counts()
+    teams = team_df["team"].value_counts()
+    role_entropy = -(roles/roles.sum() * np.log(roles/roles.sum() + 1e-9)).sum()
+    team_balance = 1 - abs(teams.iloc[0] - teams.iloc[-1]) / 11 if len(teams) > 1 else 0.5
+    return round((role_entropy + team_balance) * 10, 1)
+
+
+# ─────────────────────────────────────────────────────────
+# ANOMALY DETECTION (for run heatmap)
+# ─────────────────────────────────────────────────────────
+def detect_run_anomalies(over_stats, league_avg_rr=8.5):
+    """Detect overs with abnormal run rates"""
+    anomalies = []
+    if over_stats.empty:
+        return anomalies
+    mean_rr = over_stats["rr"].mean()
+    std_rr  = over_stats["rr"].std()
+
+    for _, row in over_stats.iterrows():
+        z = (row["rr"] - mean_rr) / max(std_rr, 0.1)
+        if abs(z) > 1.8:
+            direction = "spike" if z > 0 else "collapse"
+            anomalies.append({
+                "over": int(row.get("over_bin", row.get("over_num", 0))),
+                "rr":   round(row["rr"], 1),
+                "z":    round(z, 2),
+                "type": direction,
+                "label": f"Over {int(row.get('over_bin', 0)+1)}: {row['rr']:.1f} RPO — {'abnormal scoring spike 🚀' if z>0 else 'scoring collapse 💀'}"
+            })
+    return anomalies
